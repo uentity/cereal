@@ -363,7 +363,7 @@ namespace cereal
           deferment();
       }
 
-    private:
+    protected:
       //! Serializes data after calling prologue, then calls epilogue
       template <class T> inline
       void process( T && head )
@@ -381,6 +381,7 @@ namespace cereal
         self->process( std::forward<Other>( tail )... );
       }
 
+    private:
       //! Serialization of a virtual_base_class wrapper
       /*! \sa virtual_base_class */
       template <class T> inline
@@ -530,7 +531,7 @@ namespace cereal
           detail::StaticObject<detail::Versions>::getInstance().find( hash, detail::Version<T>::version );
 
         if( insertResult.second ) // insertion took place, serialize the version number
-          process( make_nvp<ArchiveType>("cereal_class_version", version) );
+          self->process( make_nvp<ArchiveType>("cereal_class_version", version) );
 
         return version;
       }
@@ -651,7 +652,7 @@ namespace cereal
       template <class ... Types> inline
       ArchiveType & operator()( Types && ... args )
       {
-        process( std::forward<Types>( args )... );
+        self->process( std::forward<Types>( args )... );
         return *self;
       }
 
@@ -762,7 +763,7 @@ namespace cereal
           deferment();
       }
 
-    private:
+    protected:
       //! Serializes data after calling prologue, then calls epilogue
       template <class T> inline
       void process( T && head )
@@ -776,10 +777,11 @@ namespace cereal
       template <class T, class ... Other> inline
       void process( T && head, Other && ... tail )
       {
-        process( std::forward<T>( head ) );
-        process( std::forward<Other>( tail )... );
+        self->process( std::forward<T>( head ) );
+        self->process( std::forward<Other>( tail )... );
       }
 
+    private:
       //! Serialization of a virtual_base_class wrapper
       /*! \sa virtual_base_class */
       template <class T> inline
@@ -940,7 +942,7 @@ namespace cereal
         {
           std::uint32_t version;
 
-          process( make_nvp<ArchiveType>("cereal_class_version", version) );
+          self->process( make_nvp<ArchiveType>("cereal_class_version", version) );
           itsVersionedTypes.emplace_hint( lookupResult, hash, version );
 
           return version;
