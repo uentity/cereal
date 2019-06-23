@@ -1316,6 +1316,18 @@ namespace cereal
     struct is_text_archive : std::integral_constant<bool,
       std::is_base_of<TextArchive, detail::decay_archive<A>>::value>
     { };
+
+    //! Checks if an archive defines `always_emit_polymorphic_names`
+    template <class A, class = void>
+    struct always_emit_polymorphic_name : std::false_type {};
+
+    template <class A>
+    struct always_emit_polymorphic_name<A,
+      std::void_t<decltype(A::always_emit_polymorphic_name)>> : std::true_type {};
+
+    template <class A>
+    inline constexpr auto always_emit_polymorphic_name_v =
+      always_emit_polymorphic_name<detail::decay_archive<A>>::value;
   } // namespace traits
 
   // ######################################################################

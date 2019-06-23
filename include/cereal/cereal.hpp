@@ -354,7 +354,12 @@ namespace cereal
           return polyId | detail::msb_32bit; // mask MSB to be 1
         }
         else
-          return id->second;
+        {
+          if constexpr(traits::always_emit_polymorphic_name_v<ArchiveType>)
+            return id->second | detail::msb_32bit; // always mask MSB
+          else
+            return id->second;
+        }
       }
 
       void serializeDeferments()
@@ -751,10 +756,10 @@ namespace cereal
 
           @param id The unique identifier for the polymorphic type
           @param name The name associated with the tyep */
-      inline void registerPolymorphicName(std::uint32_t const id, std::string const & name)
+      inline void registerPolymorphicName(std::uint32_t const id, std::string name)
       {
         std::uint32_t const stripped_id = id & ~detail::msb_32bit;
-        itsPolymorphicTypeMap.insert( {stripped_id, name} );
+        itsPolymorphicTypeMap.try_emplace( stripped_id, std::move(name) );
       }
 
       void serializeDeferments()
