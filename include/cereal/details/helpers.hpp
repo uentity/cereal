@@ -36,6 +36,7 @@
 #include <memory>
 #include <unordered_map>
 #include <stdexcept>
+#include <functional>
 
 #include "cereal/macros.hpp"
 #include "cereal/details/static_object.hpp"
@@ -69,6 +70,7 @@ namespace cereal
   {
     struct NameValuePairCore {}; //!< Traits struct for NVPs
     struct DeferredDataCore {}; //!< Traits struct for DeferredData
+    struct FunctorCore {}; //!< Traits struct for DeferredData
   }
 
   // ######################################################################
@@ -252,6 +254,20 @@ namespace cereal
       DeferredData( T && v ) : value(std::forward<T>(v)) {}
 
       Type value;
+  };
+
+  // ######################################################################
+  template<typename F>
+  struct Functor : detail::FunctorCore {
+    F serial_f;
+
+    Functor(F&& f) : serial_f(std::forward<F>(f)) {}
+
+    template<typename Archive> inline
+    void CEREAL_SERIALIZE_FUNCTION_NAME( Archive& ar ) {
+      static_assert(std::is_invocable_v<F, Archive&>, "Functor is incompatible with given archive type");
+      std::invoke(serial_f, ar);
+    }
   };
 
   // ######################################################################

@@ -373,9 +373,11 @@ namespace cereal
       template <class T> inline
       void process( T && head )
       {
-        prologue( *self, head );
+        // prologue/epilogue are meaningless for Functors
+        constexpr auto is_functor = std::is_base_of_v<detail::FunctorCore, std::decay_t<T>>;
+        if constexpr(!is_functor) prologue( *self, head );
         self->processImpl( head );
-        epilogue( *self, head );
+        if constexpr(!is_functor) epilogue( *self, head );
       }
 
       //! Unwinds to process all data
@@ -775,9 +777,11 @@ namespace cereal
       template <class T> inline
       void process( T && head )
       {
-        prologue( *self, head );
+        // prologue/epilogue are meaningless for Functors
+        constexpr auto is_functor = std::is_base_of_v<detail::FunctorCore, std::decay_t<T>>;
+        if constexpr(!is_functor) prologue( *self, head );
         self->processImpl( head );
-        epilogue( *self, head );
+        if constexpr(!is_functor) epilogue( *self, head );
       }
 
       //! Unwinds to process all data
