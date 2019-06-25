@@ -815,9 +815,12 @@ namespace cereal
       std::vector<std::function<void(void)>> itsDeferments;
 
       template <class T> inline
-      ArchiveType & processImpl(DeferredData<T> const & d)
+      ArchiveType & processImpl(DeferredData<T>& d)
       {
-        std::function<void(void)> deferment( [=](){ self->process( d.value ); } );
+        // it's safe to move value from `d` because called only once
+        std::function<void(void)> deferment( [value = std::move(d.value), this]() mutable {
+          self->process( value );
+        } );
         itsDeferments.emplace_back( std::move(deferment) );
 
         return *self;
