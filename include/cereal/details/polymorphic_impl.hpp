@@ -493,7 +493,7 @@ namespace cereal
           a shared_ptr (or unique_ptr for the unique case) of any base
           type, and the type id of said base type as the third parameter.
           Internally it will properly be loaded and cast to the correct type. */
-      typedef std::function<void(void*, std::shared_ptr<void> &, std::type_info const &)> SharedSerializer;
+      typedef std::function<std::uint32_t(void*, std::shared_ptr<void> &, std::type_info const &)> SharedSerializer;
       //! Unique ptr serializer function
       typedef std::function<void(void*, std::unique_ptr<void, EmptyDeleter<void>> &, std::type_info const &)> UniqueSerializer;
 
@@ -545,9 +545,11 @@ namespace cereal
             Archive & ar = *static_cast<Archive*>(arptr);
             std::shared_ptr<T> ptr;
 
-            ar( CEREAL_NVP_("ptr_wrapper", ::cereal::memory_detail::make_ptr_wrapper(ptr)) );
+            auto wrapper = ::cereal::memory_detail::make_ptr_wrapper(ptr);
+            ar( CEREAL_NVP_("ptr_wrapper", wrapper) );
 
             dptr = PolymorphicCasters::template upcast<T>( ptr, baseInfo );
+            return wrapper.pid;
           };
 
         serializers.unique_ptr =

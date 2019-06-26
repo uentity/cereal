@@ -732,10 +732,11 @@ namespace cereal
 
           @param id The unique identifier for the shared pointer
           @param ptr The actual shared pointer */
-      inline void registerSharedPointer(std::uint32_t const id, std::shared_ptr<void> ptr)
+      inline std::uint32_t registerSharedPointer(std::uint32_t const id, std::shared_ptr<void> ptr)
       {
         std::uint32_t const stripped_id = id & ~detail::msb_32bit;
         itsSharedPointerMap[stripped_id] = ptr;
+        return stripped_id;
       }
 
       //! Retrieves the string for a polymorphic type given a unique key for it

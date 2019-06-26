@@ -200,7 +200,7 @@ namespace cereal
       if(nameid == 0)
       {
         typename ::cereal::detail::InputBindingMap::Serializers emptySerializers;
-        emptySerializers.shared_ptr = [](void*, std::shared_ptr<void> & ptr, std::type_info const &) { ptr.reset(); };
+        emptySerializers.shared_ptr = [](void*, std::shared_ptr<void> & ptr, std::type_info const &) { ptr.reset(); return 0; };
         emptySerializers.unique_ptr = [](void*, std::unique_ptr<void, ::cereal::detail::EmptyDeleter<void>> & ptr, std::type_info const &) { ptr.reset( nullptr ); };
         return emptySerializers;
       }
