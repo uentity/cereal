@@ -1317,6 +1317,31 @@ namespace cereal
       std::is_base_of<TextArchive, detail::decay_archive<A>>::value>
     { };
 
+    //! Detect if U is shared_ptr
+    template<typename U> struct is_smart_ptr {
+      static constexpr auto shared = false;
+      static constexpr auto weak = false;
+      static constexpr auto unique = false;
+    };
+    template<typename U> struct is_smart_ptr<std::shared_ptr<U>> {
+      static constexpr auto shared = true;
+      static constexpr auto weak = false;
+      static constexpr auto unique = false;
+    };
+    template<typename U> struct is_smart_ptr<std::weak_ptr<U>> {
+      static constexpr auto shared = false;
+      static constexpr auto weak = true;
+      static constexpr auto unique = false;
+    };
+    template<typename U, typename D> struct is_smart_ptr<std::unique_ptr<U, D>> {
+      static constexpr auto shared = false;
+      static constexpr auto weak = false;
+      static constexpr auto unique = true;
+    };
+    template<typename U> inline constexpr auto is_shared_ptr_v = is_smart_ptr<std::decay_t<U>>::shared;
+    template<typename U> inline constexpr auto is_weak_ptr_v   = is_smart_ptr<std::decay_t<U>>::weak;
+    template<typename U> inline constexpr auto is_unique_ptr_v = is_smart_ptr<std::decay_t<U>>::unique;
+
     //! Checks if an archive defines `always_emit_polymorphic_names`
     template <class A, class = void>
     struct always_emit_polymorphic_name : std::false_type {};
