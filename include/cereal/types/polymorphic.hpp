@@ -294,7 +294,84 @@ namespace cereal
         throw cereal::Exception("Cannot load a polymorphic type that is not default constructable and does not have a load_and_construct function");
       return false;
     }
+
+    //! shared pointer loading implementation that returnes pointer ID
+    template<typename Archive, typename T>
+    auto load_shared_ptr(Archive& ar, std::shared_ptr<T>& ptr, bool dont_throw = false) -> std::uint32_t {
+      std::uint32_t nameid;
+      ar( CEREAL_NVP_("polymorphic_id", nameid) );
+
+      // Check to see if we can skip all of this polymorphism business
+      if(polymorphic_detail::serialize_wrapper(ar, ptr, nameid))
+        return 0;
+
+      auto binding = polymorphic_detail::getInputBinding(ar, nameid);
+      std::shared_ptr<void> result;
+      auto pid = binding.shared_ptr(&ar, result, typeid(T));
+      ptr = std::static_pointer_cast<T>(result);
+      return pid;
+    }
   } // polymorphic_detail
+
+  // ######################################################################
+  //! Wrapper that allows to defer failed shared_ptr deserialization
+  //! and forward deferred pointer to given callback
+  template<typename T, typename F>
+  struct DeferredPtrWrapper {
+    template< typename = std::enable_if_t<traits::is_shared_ptr_v<T>> >
+    DeferredPtrWrapper(T&& value, F&& deferred_cb)
+      : ptr(std::forward<T>(value)), callback(std::forward<F>(deferred_cb))
+    {}
+
+    template<typename Archive>
+    void CEREAL_SAVE_FUNCTION_NAME(Archive& ar) const {
+      // directly call save to skip creation of nested section
+      ::cereal::CEREAL_SAVE_FUNCTION_NAME(ar, ptr);
+    }
+
+    template<typename Archive>
+    void CEREAL_LOAD_FUNCTION_NAME(Archive& ar) {
+      using Pointee = typename std::decay_t<T>::element_type;
+      static_assert(std::is_polymorphic_v<Pointee>, "Pointee type must be polymorphic");
+      static_assert(std::is_invocable_v<F, T>, "Deferred callback must accept std::shared_ptr");
+
+      // try load pointer
+      auto pid = polymorphic_detail::load_shared_ptr(ar, ptr);
+      // if failed - defer second trial
+      if(!ptr && pid) {
+        ar( defer(Functor{ [f = std::forward<F>(callback), pid](Archive& ar) {
+          f( std::static_pointer_cast<Pointee>(ar.getSharedPointer(pid)) );
+        } }) );
+      }
+    }
+
+    using type = std::conditional_t<std::is_lvalue_reference_v<T>, T, std::decay_t<T>>;
+    type ptr;
+    F callback;
+  };
+
+  template<typename T, typename F> DeferredPtrWrapper(T&&, F&&) -> DeferredPtrWrapper<T, F>;
+
+  template<typename T, typename F> inline
+  auto defer_failed(T&& ptr, F&& deferred_cb) {
+    static_assert(traits::is_shared_ptr_v<T>, "Applicable only to shared_ptrs");
+    return DeferredPtrWrapper{ std::forward<T>(ptr), std::forward<F>(deferred_cb) };
+  }
+
+  template<typename T> inline
+  auto defer_failed(T& ptr) {
+    // catch lvalue reference to ptr and make deferred assign to it
+    return defer_failed( ptr, [&ptr](auto&& src){ ptr = std::forward<decltype(src)>(src); } );
+  }
+
+  //! Acceptor is some other variable that can be assign from loaded shared pointer
+  template<typename T, typename Aceptor> inline
+  auto defer_failed_to(T&& ptr, Aceptor& tgt) {
+    return defer_failed(
+      std::forward<T>(ptr),
+      [&tgt](auto&& src){ tgt = std::forward<decltype(src)>(src); }
+    );
+  }
 
   // ######################################################################
   // Pointer serialization for polymorphic types
@@ -366,17 +443,9 @@ namespace cereal
   typename std::enable_if<std::is_polymorphic<T>::value, void>::type
   CEREAL_LOAD_FUNCTION_NAME( Archive & ar, std::shared_ptr<T> & ptr )
   {
-    std::uint32_t nameid;
-    ar( CEREAL_NVP_("polymorphic_id", nameid) );
-
-    // Check to see if we can skip all of this polymorphism business
-    if(polymorphic_detail::serialize_wrapper(ar, ptr, nameid))
-      return;
-
-    auto binding = polymorphic_detail::getInputBinding(ar, nameid);
-    std::shared_ptr<void> result;
-    binding.shared_ptr(&ar, result, typeid(T));
-    ptr = std::static_pointer_cast<T>(result);
+    auto pid = polymorphic_detail::load_shared_ptr(ar, ptr);
+    if(!ptr && pid)
+      throw Exception("Error while trying to deserialize a smart pointer. Could not find id " + std::to_string(pid));
   }
 
   //! Saving std::weak_ptr for polymorphic types
