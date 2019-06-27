@@ -364,8 +364,8 @@ namespace cereal
 
       void serializeDeferments()
       {
-        for( auto & deferment : itsDeferments )
-          deferment();
+        for( auto D = itsDeferments.rbegin(), end = itsDeferments.rend(); D != end; ++D )
+          (*D)();
       }
 
     protected:
@@ -769,8 +769,8 @@ namespace cereal
 
       void serializeDeferments()
       {
-        for( auto & deferment : itsDeferments )
-          deferment();
+        for( auto D = itsDeferments.rbegin(), end = itsDeferments.rend(); D != end; ++D )
+          (*D)();
       }
 
     protected:
