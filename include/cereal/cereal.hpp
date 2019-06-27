@@ -530,12 +530,14 @@ namespace cereal
       std::uint32_t registerClassVersion()
       {
         static const auto hash = std::type_index(typeid(T)).hash_code();
-        const auto insertResult = itsVersionedTypes.insert( hash );
         const auto lock = detail::StaticObject<detail::Versions>::lock();
         const auto version =
           detail::StaticObject<detail::Versions>::getInstance().find( hash, detail::Version<T>::version );
 
-        if( insertResult.second ) // insertion took place, serialize the version number
+        auto do_serialize_version = true;
+        if constexpr(!traits::always_emit_class_version_v<ArchiveType>)
+          do_serialize_version = itsVersionedTypes.insert( hash ).second;
+        if( do_serialize_version )
           self->process( make_nvp<ArchiveType>("cereal_class_version", version) );
 
         return version;
@@ -938,20 +940,23 @@ namespace cereal
       template <class T> inline
       std::uint32_t loadClassVersion()
       {
-        static const auto hash = std::type_index(typeid(T)).hash_code();
-        auto lookupResult = itsVersionedTypes.find( hash );
-
-        if( lookupResult != itsVersionedTypes.end() ) // already exists
-          return lookupResult->second;
-        else // need to load
-        {
-          std::uint32_t version;
-
+        std::uint32_t version;
+        if constexpr(traits::always_emit_class_version_v<ArchiveType>) {
           self->process( make_nvp<ArchiveType>("cereal_class_version", version) );
-          itsVersionedTypes.emplace_hint( lookupResult, hash, version );
-
-          return version;
         }
+        else {
+          static const auto hash = std::type_index(typeid(T)).hash_code();
+          auto lookupResult = itsVersionedTypes.find( hash );
+
+          if( lookupResult != itsVersionedTypes.end() ) // already exists
+            version = lookupResult->second;
+          else // need to load
+          {
+            self->process( make_nvp<ArchiveType>("cereal_class_version", version) );
+            itsVersionedTypes.emplace_hint( lookupResult, hash, version );
+          }
+        }
+        return version;
       }
 
       //! Member serialization

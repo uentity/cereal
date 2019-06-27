@@ -1328,6 +1328,18 @@ namespace cereal
     template <class A>
     inline constexpr auto always_emit_polymorphic_name_v =
       always_emit_polymorphic_name<detail::decay_archive<A>>::value;
+
+    //! Checks if an archive defines `always_emit_class_version`
+    template <class A, class = void>
+    struct always_emit_class_version : std::false_type {};
+
+    template <class A>
+    struct always_emit_class_version<A,
+      std::void_t<decltype(A::always_emit_class_version)>> : std::true_type {};
+
+    template <class A>
+    inline constexpr auto always_emit_class_version_v =
+      always_emit_class_version<detail::decay_archive<A>>::value;
   } // namespace traits
 
   // ######################################################################
