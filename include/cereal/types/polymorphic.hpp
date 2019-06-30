@@ -316,11 +316,18 @@ namespace cereal
   // ######################################################################
   //! Wrapper that allows to defer failed shared_ptr deserialization
   //! and forward deferred pointer to given callback
+  enum class PtrInitTrigger { Retry, SuccessAndRetry };
+
   template<typename T, typename F>
   struct DeferredPtrWrapper {
+    using type = std::conditional_t<std::is_lvalue_reference_v<T>, T, std::decay_t<T>>;
+    type ptr;
+    F callback;
+    PtrInitTrigger trigger;
+
     template< typename = std::enable_if_t<traits::is_shared_ptr_v<T>> >
-    DeferredPtrWrapper(T&& value, F&& deferred_cb)
-      : ptr(std::forward<T>(value)), callback(std::forward<F>(deferred_cb))
+    DeferredPtrWrapper(T&& value, F&& ptr_init_cb, PtrInitTrigger invoke_on = PtrInitTrigger::Retry)
+      : ptr(std::forward<T>(value)), callback(std::forward<F>(ptr_init_cb)), trigger(invoke_on)
     {}
 
     template<typename Archive>
@@ -333,43 +340,47 @@ namespace cereal
     void CEREAL_LOAD_FUNCTION_NAME(Archive& ar) {
       using Pointee = typename std::decay_t<T>::element_type;
       static_assert(std::is_polymorphic_v<Pointee>, "Pointee type must be polymorphic");
-      static_assert(std::is_invocable_v<F, T>, "Deferred callback must accept std::shared_ptr");
+      static_assert(std::is_invocable_v<F, std::shared_ptr<Pointee>>,
+          "Deferred callback must accept std::shared_ptr");
 
       // try load pointer
       auto pid = polymorphic_detail::load_shared_ptr(ar, ptr);
+      if(trigger == PtrInitTrigger::SuccessAndRetry && ptr)
+        std::invoke( callback, std::forward<type>(ptr) );
+
       // if failed - defer second trial
       if(!ptr && pid) {
         ar( defer(Functor{ [f = std::forward<F>(callback), pid](Archive& ar) {
-          f( std::static_pointer_cast<Pointee>(ar.getSharedPointer(pid)) );
+          std::invoke( f, std::static_pointer_cast<Pointee>(ar.getSharedPointer(pid)) );
         } }) );
       }
     }
-
-    using type = std::conditional_t<std::is_lvalue_reference_v<T>, T, std::decay_t<T>>;
-    type ptr;
-    F callback;
   };
 
   template<typename T, typename F> DeferredPtrWrapper(T&&, F&&) -> DeferredPtrWrapper<T, F>;
+  template<typename T, typename F> DeferredPtrWrapper(T&&, F&&, PtrInitTrigger) -> DeferredPtrWrapper<T, F>;
 
   template<typename T, typename F> inline
-  auto defer_failed(T&& ptr, F&& deferred_cb) {
+  auto defer_failed(T&& ptr, F&& deferred_cb, PtrInitTrigger trigger = PtrInitTrigger::Retry) {
     static_assert(traits::is_shared_ptr_v<T>, "Applicable only to shared_ptrs");
-    return DeferredPtrWrapper{ std::forward<T>(ptr), std::forward<F>(deferred_cb) };
+    return DeferredPtrWrapper{ std::forward<T>(ptr), std::forward<F>(deferred_cb), trigger };
   }
 
   template<typename T> inline
-  auto defer_failed(T& ptr) {
+  auto defer_failed(T& ptr, PtrInitTrigger trigger = PtrInitTrigger::Retry) {
     // catch lvalue reference to ptr and make deferred assign to it
-    return defer_failed( ptr, [&ptr](auto&& src){ ptr = std::forward<decltype(src)>(src); } );
+    return defer_failed(
+      ptr, [&ptr](auto&& src){ ptr = std::forward<decltype(src)>(src); }, trigger
+    );
   }
 
   //! Acceptor is some other variable that can be assign from loaded shared pointer
   template<typename T, typename Aceptor> inline
-  auto defer_failed_to(T&& ptr, Aceptor& tgt) {
+  auto defer_failed_to(T&& ptr, Aceptor& tgt, PtrInitTrigger trigger = PtrInitTrigger::Retry) {
     return defer_failed(
       std::forward<T>(ptr),
-      [&tgt](auto&& src){ tgt = std::forward<decltype(src)>(src); }
+      [&tgt](auto&& src){ tgt = std::forward<decltype(src)>(src); },
+      trigger
     );
   }
 
