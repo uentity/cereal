@@ -394,11 +394,13 @@ namespace cereal
       template <class T> inline
       ArchiveType & processImpl(virtual_base_class<T> const & b)
       {
-        traits::detail::base_class_id id(b.base_ptr);
-        if(itsBaseClassSet.count(id) == 0)
-        {
-          itsBaseClassSet.insert(id);
-          self->processImpl( *b.base_ptr );
+        if(b.base_ptr) {
+          traits::detail::base_class_id id(b.base_ptr);
+          if(itsBaseClassSet.count(id) == 0)
+          {
+            itsBaseClassSet.insert(id);
+            self->processImpl( *b.base_ptr );
+          }
         }
         return *self;
       }
@@ -408,7 +410,7 @@ namespace cereal
       template <class T> inline
       ArchiveType & processImpl(base_class<T> const & b)
       {
-        self->processImpl( *b.base_ptr );
+        if(b.base_ptr) self->processImpl( *b.base_ptr );
         return *self;
       }
 
@@ -799,11 +801,13 @@ namespace cereal
       template <class T> inline
       ArchiveType & processImpl(virtual_base_class<T> & b)
       {
-        traits::detail::base_class_id id(b.base_ptr);
-        if(itsBaseClassSet.count(id) == 0)
-        {
-          itsBaseClassSet.insert(id);
-          self->processImpl( *b.base_ptr );
+        if(b.base_ptr) {
+          traits::detail::base_class_id id(b.base_ptr);
+          if(itsBaseClassSet.count(id) == 0)
+          {
+            itsBaseClassSet.insert(id);
+            self->processImpl( *b.base_ptr );
+          }
         }
         return *self;
       }
@@ -813,7 +817,7 @@ namespace cereal
       template <class T> inline
       ArchiveType & processImpl(base_class<T> & b)
       {
-        self->processImpl( *b.base_ptr );
+        if(b.base_ptr) self->processImpl( *b.base_ptr );
         return *self;
       }
 
