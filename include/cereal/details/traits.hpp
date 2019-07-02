@@ -1342,25 +1342,27 @@ namespace cereal
     template<typename U> inline constexpr auto is_weak_ptr_v   = is_smart_ptr<std::decay_t<U>>::weak;
     template<typename U> inline constexpr auto is_unique_ptr_v = is_smart_ptr<std::decay_t<U>>::unique;
 
-    //! Checks if an archive defines `always_emit_polymorphic_names`
+    //! Checks if an archive defines `always_emit_polymorphic_names = true`
     template <class A, class = void>
     struct always_emit_polymorphic_name : std::false_type {};
 
     template <class A>
     struct always_emit_polymorphic_name<A,
-      std::void_t<decltype(A::always_emit_polymorphic_name)>> : std::true_type {};
+      std::void_t<decltype(A::always_emit_polymorphic_name)>> :
+      std::integral_constant<bool, A::always_emit_polymorphic_name> {};
 
     template <class A>
     inline constexpr auto always_emit_polymorphic_name_v =
       always_emit_polymorphic_name<detail::decay_archive<A>>::value;
 
-    //! Checks if an archive defines `always_emit_class_version`
+    //! Checks if an archive defines `always_emit_class_version = true`
     template <class A, class = void>
     struct always_emit_class_version : std::false_type {};
 
     template <class A>
     struct always_emit_class_version<A,
-      std::void_t<decltype(A::always_emit_class_version)>> : std::true_type {};
+      std::void_t<decltype(A::always_emit_class_version)>> :
+      std::integral_constant<bool, A::always_emit_class_version> {};
 
     template <class A>
     inline constexpr auto always_emit_class_version_v =
