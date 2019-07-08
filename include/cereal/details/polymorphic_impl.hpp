@@ -54,7 +54,6 @@
 #include <map>
 #include <limits>
 #include <set>
-#include <stack>
 
 //! Helper macro to omit unused warning
 #if defined(__GNUC__)
@@ -222,16 +221,147 @@ namespace cereal
         return uptr;
       }
 
+      //! Make relations maps up to date after any modifications
+      static void refresh_relations() {
+        auto & PCs = StaticObject<PolymorphicCasters>::getInstance();
+        // collect all parents & children
+        std::unordered_set<std::type_index> parents, children;
+        for(const auto& p : PCs.map) parents.insert(p.first);
+        for(const auto& p : PCs.reverseMap) children.insert(p.first);
+        // refresh all relations at once
+        postprocess_relations( std::move(parents), std::move(children) );
+      }
+
+      #ifdef CEREAL_OLDER_GCC
+        #define CEREAL_EMPLACE_MAP(map, key, value)                     \
+        map.insert( std::make_pair(std::move(key), std::move(value)) );
+      #else // NOT CEREAL_OLDER_GCC
+        #define CEREAL_EMPLACE_MAP(map, key, value)                     \
+        map.emplace( key, value );
+      #endif // NOT_CEREAL_OLDER_GCC
+
+      // Find all chainable unregistered relations
+      /* The strategy here is to process only the nodes in the class hierarchy graph that have been
+          affected by the new insertion. The aglorithm iteratively processes a node an ensures that it
+          is updated with all new shortest length paths. It then processes the parents of the active node,
+          with the knowledge that all children have already been processed.
+
+          Note that for the following, we'll use the nomenclature of parent and child to not confuse with
+          the inserted base derived relationship */
+      static void postprocess_relations(
+        std::unordered_set<std::type_index> parentStack, // Holds the parent nodes to be processed
+        std::unordered_set<std::type_index> dirtySet     // Marks child nodes that have been changed
+      ) {
+        auto & PCs = StaticObject<PolymorphicCasters>::getInstance();
+        auto & baseMap = PCs.map;
+        auto & reverseMap = PCs.reverseMap;
+
+        // Checks whether there is a path from parent->child and returns a <dist, path> pair
+        // dist is set to MAX if the path does not exist
+        auto checkRelation = [](std::type_index const & parentInfo, std::type_index const & childInfo) ->
+          std::pair<size_t, std::vector<PolymorphicCaster const *> const &>
+        {
+          auto result = lookup_if_exists( parentInfo, childInfo );
+          if( result.first )
+          {
+            auto const & path = result.second;
+            return {path.size(), path};
+          }
+          else
+            return {(std::numeric_limits<size_t>::max)(), {}};
+        };
+
+        std::unordered_set<std::type_index> processedParents; // Marks parent nodes that have been processed
+
+        while( !parentStack.empty() )
+        {
+          using Relations = std::unordered_multimap<std::type_index, std::pair<std::type_index, std::vector<PolymorphicCaster const *>>>;
+          Relations unregisteredRelations; // Defer insertions until after main loop to prevent iterator invalidation
+
+          const auto parent = *parentStack.begin();
+          parentStack.erase(parentStack.begin());
+
+          // Update paths to all children marked dirty
+          for( auto const & childPair : baseMap[parent] )
+          {
+            const auto child = childPair.first;
+            if( (dirtySet.find( child ) != dirtySet.end()) && baseMap.count( child ) )
+            {
+              auto parentChildPath = checkRelation( parent, child );
+
+              // Search all paths from the child to its own children (finalChild),
+              // looking for a shorter parth from parent to finalChild
+              for( auto const & finalChildPair : baseMap[child] )
+              {
+                const auto finalChild = finalChildPair.first;
+
+                auto parentFinalChildPath = checkRelation( parent, finalChild );
+                auto childFinalChildPath  = checkRelation( child, finalChild );
+
+                const size_t newLength = 1u + parentChildPath.first;
+
+                if( newLength < parentFinalChildPath.first )
+                {
+                  std::vector<PolymorphicCaster const *> path = parentChildPath.second;
+                  path.insert( path.end(), childFinalChildPath.second.begin(), childFinalChildPath.second.end() );
+
+                  // Check to see if we have a previous uncommitted path in unregisteredRelations
+                  // that is shorter. If so, ignore this path
+                  auto hintRange = unregisteredRelations.equal_range( parent );
+                  auto hint = hintRange.first;
+                  for( ; hint != hintRange.second; ++hint )
+                    if( hint->second.first == finalChild )
+                      break;
+
+                  const bool uncommittedExists = hint != unregisteredRelations.end();
+                  if( uncommittedExists && (hint->second.second.size() <= newLength) )
+                    continue;
+
+                  auto newPath = std::pair<std::type_index, std::vector<PolymorphicCaster const *>>{finalChild, std::move(path)};
+
+                  // Insert the new path if it doesn't exist, otherwise this will just lookup where to do the
+                  // replacement
+                  #ifdef CEREAL_OLDER_GCC
+                  auto old = unregisteredRelations.insert( hint, std::make_pair(parent, newPath) );
+                  #else // NOT CEREAL_OLDER_GCC
+                  auto old = unregisteredRelations.emplace_hint( hint, parent, newPath );
+                  #endif // NOT CEREAL_OLDER_GCC
+
+                  // If there was an uncommitted path, we need to perform a replacement
+                  if( uncommittedExists )
+                    old->second = newPath;
+                }
+              } // end loop over child's children
+            } // end if dirty and child has children
+          } // end loop over children
+
+          // Insert chained relations
+          for( auto const & it : unregisteredRelations )
+          {
+            auto & derivedMap = baseMap.find( it.first )->second;
+            derivedMap[it.second.first] = it.second.second;
+            CEREAL_EMPLACE_MAP(reverseMap, it.second.first, it.first );
+          }
+
+          // Mark current parent as modified
+          dirtySet.insert( parent );
+
+          // Insert all parents of the current parent node that haven't yet been processed
+          auto parentRange = reverseMap.equal_range( parent );
+          for( auto pIter = parentRange.first; pIter != parentRange.second; ++pIter )
+          {
+            const auto pParent = pIter->second;
+            if( !processedParents.count( pParent ) )
+            {
+              parentStack.insert( pParent );
+              processedParents.insert( pParent );
+            }
+          }
+        } // end loop over parent stack
+      } // end postprocess_relations
+
       #undef UNREGISTERED_POLYMORPHIC_CAST_EXCEPTION
     };
-
-    #ifdef CEREAL_OLDER_GCC
-      #define CEREAL_EMPLACE_MAP(map, key, value)                     \
-      map.insert( std::make_pair(std::move(key), std::move(value)) );
-    #else // NOT CEREAL_OLDER_GCC
-      #define CEREAL_EMPLACE_MAP(map, key, value)                     \
-      map.emplace( key, value );
-    #endif // NOT_CEREAL_OLDER_GCC
 
     //! Strongly typed derivation of PolymorphicCaster
     template <class Base, class Derived>
@@ -260,136 +390,9 @@ namespace cereal
         auto & reverseMap = StaticObject<PolymorphicCasters>::getInstance().reverseMap;
         CEREAL_EMPLACE_MAP(reverseMap, derivedKey, baseKey);
 
-        // Find all chainable unregistered relations
-        /* The strategy here is to process only the nodes in the class hierarchy graph that have been
-           affected by the new insertion. The aglorithm iteratively processes a node an ensures that it
-           is updated with all new shortest length paths. It then rocesses the parents of the active node,
-           with the knowledge that all children have already been processed.
-
-           Note that for the following, we'll use the nomenclature of parent and child to not confuse with
-           the inserted base derived relationship */
-        {
-          // Checks whether there is a path from parent->child and returns a <dist, path> pair
-          // dist is set to MAX if the path does not exist
-          auto checkRelation = [](std::type_index const & parentInfo, std::type_index const & childInfo) ->
-            std::pair<size_t, std::vector<PolymorphicCaster const *> const &>
-          {
-            auto result = PolymorphicCasters::lookup_if_exists( parentInfo, childInfo );
-            if( result.first )
-            {
-              auto const & path = result.second;
-              return {path.size(), path};
-            }
-            else
-              return {(std::numeric_limits<size_t>::max)(), {}};
-          };
-
-          std::stack<std::type_index>         parentStack;      // Holds the parent nodes to be processed
-          std::vector<std::type_index> dirtySet;                // Marks child nodes that have been changed
-          std::unordered_set<std::type_index> processedParents; // Marks parent nodes that have been processed
-
-          // Checks if a child has been marked dirty
-          auto isDirty = [&](std::type_index const & c)
-          {
-            auto const dirtySetSize = dirtySet.size();
-            for( size_t i = 0; i < dirtySetSize; ++i )
-              if( dirtySet[i] == c )
-                return true;
-
-            return false;
-          };
-
-          // Begin processing the base key and mark derived as dirty
-          parentStack.push( baseKey );
-          dirtySet.emplace_back( derivedKey );
-
-          while( !parentStack.empty() )
-          {
-            using Relations = std::unordered_multimap<std::type_index, std::pair<std::type_index, std::vector<PolymorphicCaster const *>>>;
-            Relations unregisteredRelations; // Defer insertions until after main loop to prevent iterator invalidation
-
-            const auto parent = parentStack.top();
-            parentStack.pop();
-
-            // Update paths to all children marked dirty
-            for( auto const & childPair : baseMap[parent] )
-            {
-              const auto child = childPair.first;
-              if( isDirty( child ) && baseMap.count( child ) )
-              {
-                auto parentChildPath = checkRelation( parent, child );
-
-                // Search all paths from the child to its own children (finalChild),
-                // looking for a shorter parth from parent to finalChild
-                for( auto const & finalChildPair : baseMap[child] )
-                {
-                  const auto finalChild = finalChildPair.first;
-
-                  auto parentFinalChildPath = checkRelation( parent, finalChild );
-                  auto childFinalChildPath  = checkRelation( child, finalChild );
-
-                  const size_t newLength = 1u + parentChildPath.first;
-
-                  if( newLength < parentFinalChildPath.first )
-                  {
-                    std::vector<PolymorphicCaster const *> path = parentChildPath.second;
-                    path.insert( path.end(), childFinalChildPath.second.begin(), childFinalChildPath.second.end() );
-
-                    // Check to see if we have a previous uncommitted path in unregisteredRelations
-                    // that is shorter. If so, ignore this path
-                    auto hintRange = unregisteredRelations.equal_range( parent );
-                    auto hint = hintRange.first;
-                    for( ; hint != hintRange.second; ++hint )
-                      if( hint->second.first == finalChild )
-                        break;
-
-                    const bool uncommittedExists = hint != unregisteredRelations.end();
-                    if( uncommittedExists && (hint->second.second.size() <= newLength) )
-                      continue;
-
-                    auto newPath = std::pair<std::type_index, std::vector<PolymorphicCaster const *>>{finalChild, std::move(path)};
-
-                    // Insert the new path if it doesn't exist, otherwise this will just lookup where to do the
-                    // replacement
-                    #ifdef CEREAL_OLDER_GCC
-                    auto old = unregisteredRelations.insert( hint, std::make_pair(parent, newPath) );
-                    #else // NOT CEREAL_OLDER_GCC
-                    auto old = unregisteredRelations.emplace_hint( hint, parent, newPath );
-                    #endif // NOT CEREAL_OLDER_GCC
-
-                    // If there was an uncommitted path, we need to perform a replacement
-                    if( uncommittedExists )
-                      old->second = newPath;
-                  }
-                } // end loop over child's children
-              } // end if dirty and child has children
-            } // end loop over children
-
-            // Insert chained relations
-            for( auto const & it : unregisteredRelations )
-            {
-              auto & derivedMap = baseMap.find( it.first )->second;
-              derivedMap[it.second.first] = it.second.second;
-              CEREAL_EMPLACE_MAP(reverseMap, it.second.first, it.first );
-            }
-
-            // Mark current parent as modified
-            dirtySet.emplace_back( parent );
-
-            // Insert all parents of the current parent node that haven't yet been processed
-            auto parentRange = reverseMap.equal_range( parent );
-            for( auto pIter = parentRange.first; pIter != parentRange.second; ++pIter )
-            {
-              const auto pParent = pIter->second;
-              if( !processedParents.count( pParent ) )
-              {
-                parentStack.push( pParent );
-                processedParents.insert( pParent );
-              }
-            }
-          } // end loop over parent stack
-        } // end chainable relations
-      } // end PolymorphicVirtualCaster()
+        // Postprocess new relation
+        PolymorphicCasters::postprocess_relations( {baseKey}, {derivedKey} );
+      }
 
       #undef CEREAL_EMPLACE_MAP
 
