@@ -1376,6 +1376,12 @@ namespace cereal
     template <class A>
     inline constexpr auto always_emit_class_version_v =
       always_emit_class_version<detail::decay_archive<A>>::value;
+
+    //! Allows to define specific class version tag based on archive
+    template <class A, class = void>
+    struct class_version_tag {
+      static constexpr auto value = "cereal_class_version";
+    };
   } // namespace traits
 
   // ######################################################################

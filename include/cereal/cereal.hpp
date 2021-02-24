@@ -592,7 +592,7 @@ namespace cereal
         if constexpr(!traits::always_emit_class_version_v<ArchiveType>)
           do_serialize_version = itsVersionedTypes.insert( hash ).second;
         if( do_serialize_version )
-          self->process( make_nvp<ArchiveType>("cereal_class_version", version) );
+          self->process( make_nvp<ArchiveType>(traits::class_version_tag<ArchiveType>::value, version) );
 
         return version;
       }
@@ -1014,7 +1014,7 @@ namespace cereal
       {
         std::uint32_t version;
         if constexpr(traits::always_emit_class_version_v<ArchiveType>) {
-          self->process( make_nvp<ArchiveType>("cereal_class_version", version) );
+          self->process( make_nvp<ArchiveType>(traits::class_version_tag<ArchiveType>::value, version) );
         }
         else {
           static const auto hash = std::type_index(typeid(T)).hash_code();
@@ -1024,7 +1024,7 @@ namespace cereal
             version = lookupResult->second;
           else // need to load
           {
-            self->process( make_nvp<ArchiveType>("cereal_class_version", version) );
+            self->process( make_nvp<ArchiveType>(traits::class_version_tag<ArchiveType>::value, version) );
             itsVersionedTypes.emplace_hint( lookupResult, hash, version );
           }
         }
